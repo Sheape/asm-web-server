@@ -1,0 +1,13 @@
+[[project]]
+path = ""
+version = "0.10.0"
+assembler = "nasm"
+instruction_set = "x86"
+
+[project.opts]
+compiler = "nasm"
+compile_flags_txt = [
+    "-felf32"
+]
+diagnostics = true
+default_diagnostics = true

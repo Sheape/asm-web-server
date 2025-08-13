@@ -25,16 +25,8 @@ MAX_CONNECTIONS equ 5
     int 0x80
 %endmacro
 
-;; void print(char* buf, size_t buf_len)
-%macro print 2
-    mov eax, SYS_WRITE
-    mov ebx, STDOUT
-    mov ecx, %1
-    mov edx, %2
-    syscall
-%endmacro
-
-%macro respond 3
+;; void write(int fd, char* buf, size_t buf_len)
+%macro write 3
     mov eax, SYS_WRITE
     mov ebx, %1
     mov ecx, %2
@@ -86,18 +78,18 @@ MAX_CONNECTIONS equ 5
 ;; Main
 section .text
 _start:
-    print creating_socket_msg, creating_socket_msg_len
+    write STDOUT, creating_socket_msg, creating_socket_msg_len
     create_socket AF_INET, SOCK_STREAM, 0
     mov [sockfd], eax
-    print binding_msg, binding_msg_len
+    write STDOUT, binding_msg, binding_msg_len
     bind_socket [sockfd], sockaddr_in, sockaddr_in_len
-    print listening_msg, listening_msg_len
+    write STDOUT, listening_msg, listening_msg_len
     listen [sockfd], MAX_CONNECTIONS
-    print accepting_msg, accepting_msg_len
+    write STDOUT, accepting_msg, accepting_msg_len
     accept [sockfd], client_addr, client_addr_len, 0
     mov [connfd], eax
-    respond [connfd], hello, hello_len
-    print hello, hello_len
+    write [connfd], response, response_len
+    write STDOUT, response, response_len
 
 _exit:
     close [connfd]
@@ -125,12 +117,14 @@ sockaddr_in:
     dw AF_INET
     dw PORT
     dd IN_ADDR
-sockaddr_in_len equ $ - sockaddr_in
+    dq 0
+sockaddr_in_len equ 64
 
 client_addr:
     dw AF_INET
     dw PORT
     dd IN_ADDR
+    dq 0
 client_addr_len:
     dd $ - client_addr
 
@@ -152,6 +146,9 @@ accepting_msg:
     db "[INFO] Accepting connections...", 10
 accepting_msg_len equ $ - accepting_msg
 
-hello:
-    db "Hello WASSUP", 10
-hello_len equ $ - hello
+response:
+    db "HTTP/1.1 200 OK", 13, 10
+    db "Content-Type: text/html; charset=utf-8", 13, 10
+    db 13, 10
+    db "<html><h1>WASSUP!! This is a basic HTTP response from a web server written in x86 assembly.</h1></html>", 10
+response_len equ $ - response

@@ -81,20 +81,51 @@ _start:
     write STDOUT, creating_socket_msg, creating_socket_msg_len
     create_socket AF_INET, SOCK_STREAM, 0
     mov [sockfd], eax
+    test eax, eax
+    jl _throw_cannot_create_socket
+
     write STDOUT, binding_msg, binding_msg_len
     bind_socket [sockfd], sockaddr_in, sockaddr_in_len
+    test eax, eax
+    jl _throw_failed_binding_socket
+
     write STDOUT, listening_msg, listening_msg_len
     listen [sockfd], MAX_CONNECTIONS
+    test eax, eax
+    jl _throw_failed_to_listen_to_socket
+
     write STDOUT, accepting_msg, accepting_msg_len
     accept [sockfd], client_addr, client_addr_len, 0
     mov [connfd], eax
+    test eax, eax
+    jl _throw_failed_to_accept_conn
+
     write [connfd], response, response_len
     write STDOUT, response, response_len
+    jmp _close_connection
 
-_exit:
+_throw_cannot_create_socket:
+    write STDERR, err_failed_to_create_socket, err_failed_to_create_socket_len
+    jmp _exit
+
+_throw_failed_binding_socket:
+    write STDERR, err_failed_to_bind_socket, err_failed_to_bind_socket_len
+    jmp _close_socket
+
+_throw_failed_to_listen_to_socket:
+    write STDERR, err_failed_to_listen_to_socket, err_failed_to_listen_to_socket_len
+    jmp _close_socket
+
+_throw_failed_to_accept_conn:
+    write STDERR, err_failed_to_accept_conn, err_failed_to_accept_conn_len
+
+_close_connection:
     close [connfd]
+
+_close_socket:
     close [sockfd]
 
+_exit:
     mov eax, SYS_EXIT
     xor ebx, ebx
     syscall
@@ -152,3 +183,20 @@ response:
     db 13, 10
     db "<html><h1>WASSUP!! This is a basic HTTP response from a web server written in x86 assembly.</h1></html>", 10
 response_len equ $ - response
+
+;; Errors
+err_failed_to_create_socket:
+    db "[ERROR] Failed to create socket.", 10
+err_failed_to_create_socket_len equ $ - err_failed_to_create_socket
+
+err_failed_to_bind_socket:
+    db "[ERROR] Failed to bind socket.", 10
+err_failed_to_bind_socket_len equ $ - err_failed_to_bind_socket
+
+err_failed_to_listen_to_socket:
+    db "[ERROR] Failed to listen to socket.", 10
+err_failed_to_listen_to_socket_len equ $ - err_failed_to_listen_to_socket
+
+err_failed_to_accept_conn:
+    db "[ERROR] Failed to listen to incoming connections.", 10
+err_failed_to_accept_conn_len equ $ - err_failed_to_accept_conn

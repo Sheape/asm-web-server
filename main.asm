@@ -2,23 +2,25 @@
 global _start
 
 ;; Magic numbers
-SYS_EXIT equ 1
-SYS_WRITE equ 4
-SYS_SOCKET equ 359
-SYS_BIND equ 361
-SYS_LISTEN equ 363
-SYS_ACCEPT equ 364
-SYS_CLOSE equ 6
+%define SYS_EXIT 1
+%define SYS_WRITE 4
+%define SYS_SOCKET 359
+%define SYS_BIND 361
+%define SYS_LISTEN 363
+%define SYS_ACCEPT 364
+%define SYS_CLOSE 6
+%define SYS_OPEN 5
+%define SYS_READ 3
 
-STDOUT equ 1
-STDERR equ 2
+%define STDOUT 1
+%define STDERR 2
 
 ;; Socket info
-AF_INET equ 2
-SOCK_STREAM equ 1
-PORT equ 0x391B
-IN_ADDR equ 0
-MAX_CONNECTIONS equ 5
+%define AF_INET 2
+%define SOCK_STREAM 1
+%define PORT 0x391B
+%define IN_ADDR 0
+%define MAX_CONNECTIONS 5
 
 ;; Macros
 %macro syscall 0
@@ -75,6 +77,21 @@ MAX_CONNECTIONS equ 5
     syscall
 %endmacro
 
+%macro open 1
+    mov eax, SYS_OPEN
+    mov ebx, %1
+    xor ecx, ecx
+    syscall
+%endmacro
+
+%macro read 3
+    mov eax, SYS_READ
+    mov ebx, %1
+    mov ecx, %2
+    mov edx, %3
+    syscall
+%endmacro
+
 ;; Main
 section .text
 _start:
@@ -94,15 +111,27 @@ _start:
     test eax, eax
     jl _throw_failed_to_listen_to_socket
 
+_accept:
     write STDOUT, accepting_msg, accepting_msg_len
     accept [sockfd], client_addr, client_addr_len, 0
     mov [connfd], eax
     test eax, eax
     jl _throw_failed_to_accept_conn
 
+    open index_filename
+    mov [fd_in], eax
+    test eax, eax
+    jl _throw_cannot_open_file
+
+    read [fd_in], html_content, html_content_len
+
     write [connfd], response, response_len
+    write [connfd], html_content, html_content_len
     write STDOUT, response, response_len
-    jmp _close_connection
+    write STDOUT, html_content, html_content_len
+
+    close [fd_in]
+    jmp _accept
 
 _throw_cannot_create_socket:
     write STDERR, err_failed_to_create_socket, err_failed_to_create_socket_len
@@ -118,6 +147,10 @@ _throw_failed_to_listen_to_socket:
 
 _throw_failed_to_accept_conn:
     write STDERR, err_failed_to_accept_conn, err_failed_to_accept_conn_len
+    jmp _close_socket
+
+_throw_cannot_open_file:
+    write STDERR, err_cannot_open_file, err_cannot_open_file_len
 
 _close_connection:
     close [connfd]
@@ -135,6 +168,9 @@ sockfd:
     resd 1
 
 connfd:
+    resd 1
+
+fd_in:
     resd 1
 
 
@@ -159,7 +195,17 @@ client_addr:
 client_addr_len:
     dd $ - client_addr
 
+
+section .bss
+html_content:
+    resb 10485760
+html_content_len equ $ - html_content
+
 section .rodata
+;; Data
+index_filename:
+    dd "index.html"
+
 ;; Logging/printable text
 creating_socket_msg:
     db "[INFO] Creating socket...", 10
@@ -181,7 +227,6 @@ response:
     db "HTTP/1.1 200 OK", 13, 10
     db "Content-Type: text/html; charset=utf-8", 13, 10
     db 13, 10
-    db "<html><h1>WASSUP!! This is a basic HTTP response from a web server written in x86 assembly.</h1></html>", 10
 response_len equ $ - response
 
 ;; Errors
@@ -200,3 +245,7 @@ err_failed_to_listen_to_socket_len equ $ - err_failed_to_listen_to_socket
 err_failed_to_accept_conn:
     db "[ERROR] Failed to listen to incoming connections.", 10
 err_failed_to_accept_conn_len equ $ - err_failed_to_accept_conn
+
+err_cannot_open_file:
+    db "[ERROR] Cannot open file.", 10
+err_cannot_open_file_len equ $ - err_cannot_open_file

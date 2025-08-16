@@ -1,11 +1,11 @@
-; Globals
+; ---------- GLOBALS ---------- ;
 global int_to_str
 
 section .bss
 tmp_buf:
     resb 12
 
-; Main
+; ---------- MAIN ---------- ;
 section .text
 
 ; char* int_to_str(int input)
@@ -23,32 +23,32 @@ int_to_str:
     mov esi, tmp_buf + 11
     test ebx, ebx
     xor bp, bp
-    jg _divide
+    jg .divide
 
-_negative:
+.negative:
     mov byte [tmp_buf], '-'
 
-_divide:
+.divide:
     mov eax, ebx
     test eax, eax
-    je _copy_to_buffer
+    je .copy_to_buffer
     xor edx, edx
     mov ecx, 10
     div ecx
     mov ebx, eax
 
-_cast:
+.cast:
     add dl, '0'
     dec esi
     inc bp
     mov [esi], dl
-    jmp _divide
+    jmp .divide
 
-_copy_to_buffer:
+.copy_to_buffer:
     movzx ecx, bp
     cld
     rep movsb
     movzx eax, bp
 
-_end:
+.end:
     ret

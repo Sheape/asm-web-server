@@ -1,6 +1,8 @@
 ;; Globals
 global _start
 
+extern int_to_str
+
 ;; Magic numbers
 %define SYS_EXIT 1
 %define SYS_WRITE 4
@@ -123,11 +125,21 @@ _accept:
     test eax, eax
     jl _throw_cannot_open_file
 
+_read:
     read [fd_in], html_content, html_content_len
+    push eax
+    mov ebx, header_content_length
+    push ebx
+    call int_to_str
+    mov edi, eax
 
     write [connfd], response, response_len
+    write [connfd], header_content_length, edi
+    write [connfd], header_separator, header_separator_len
     write [connfd], html_content, html_content_len
     write STDOUT, response, response_len
+    write STDOUT, header_content_length, edi
+    write STDOUT, header_separator, header_separator_len
     write STDOUT, html_content, html_content_len
 
     close [fd_in]
@@ -173,7 +185,6 @@ connfd:
 fd_in:
     resd 1
 
-
 section .data
 ; struct sockaddr_in {
 ;     sa_family_t     sin_family;     /* AF_INET */ (16 bits)
@@ -195,11 +206,14 @@ client_addr:
 client_addr_len:
     dd $ - client_addr
 
-
 section .bss
 html_content:
-    resb 10485760
+    resb 10485760 ;; 10MB file size limit
 html_content_len equ $ - html_content
+
+header_content_length:
+    resb 12
+header_content_length_len equ $ - header_content_length
 
 section .rodata
 ;; Data
@@ -207,6 +221,16 @@ index_filename:
     dd "index.html"
 
 ;; Logging/printable text
+response:
+    db "HTTP/1.1 200 OK", 13, 10
+    db "Content-Type: text/html; charset=utf-8", 13, 10
+    db "Content-Length: "
+response_len equ $ - response
+
+header_separator:
+    db 13, 10, 13, 10
+header_separator_len equ 4
+
 creating_socket_msg:
     db "[INFO] Creating socket...", 10
 creating_socket_msg_len equ $ - creating_socket_msg
@@ -222,12 +246,6 @@ listening_msg_len equ $ - listening_msg
 accepting_msg:
     db "[INFO] Accepting connections...", 10
 accepting_msg_len equ $ - accepting_msg
-
-response:
-    db "HTTP/1.1 200 OK", 13, 10
-    db "Content-Type: text/html; charset=utf-8", 13, 10
-    db 13, 10
-response_len equ $ - response
 
 ;; Errors
 err_failed_to_create_socket:

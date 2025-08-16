@@ -13,10 +13,12 @@ extern int_to_str
 %define SYS_CLOSE 6
 %define SYS_OPEN 5
 %define SYS_READ 3
+%define SYS_SIGACTION 67
 
 ; ---------- File Descriptors ---------- ;
 %define STDOUT 1
 %define STDERR 2
+%define SIGINT 2
 
 ; ---------- Socket Info ---------- ;
 %define AF_INET 2
@@ -29,18 +31,17 @@ extern int_to_str
 %define NEWLINE 10
 %define CR 13
 %define ANSI_BLUE 27, "[0;34m"
+%define ANSI_GREEN 27, "[0;32m"
 %define ANSI_RED 27, "[0;31m"
 %define ANSI_RESET 27, "[0m"
 
 ; ---------- Log Prefixes ---------- ;
 %define PREFIX_DEBUG ANSI_BLUE, "[DEBUG] ", ANSI_RESET
-%define PREFIX_INFO ANSI_BLUE, "[INFO] ", ANSI_RESET
+%define PREFIX_INFO ANSI_GREEN, "[INFO] ", ANSI_RESET
 %define PREFIX_ERROR ANSI_RED, "[ERROR] ", ANSI_RESET
 
 ; ---------- MACROS ---------- ;
-%macro syscall 0
-    int 0x80
-%endmacro
+%define syscall int 0x80
 
 ;; void write(int fd, char* buf, size_t buf_len)
 %macro write 3
@@ -107,17 +108,28 @@ extern int_to_str
     syscall
 %endmacro
 
+%macro sigaction 3
+    mov eax, SYS_SIGACTION
+    mov ebx, %1
+    mov ecx, %2
+    mov edx, %3
+    syscall
+%endmacro
+
 ; ---------- MAIN ---------- ;
 section .text
 _start:
+    sigaction SIGINT, sigint_action, 0
+
     write STDOUT, creating_socket_msg, creating_socket_msg_len
     create_socket AF_INET, SOCK_STREAM, 0
     mov [sockfd], eax
     test eax, eax
     jl .throw_cannot_create_socket
+    inc byte [stage]
 
     write STDOUT, binding_msg, binding_msg_len
-    bind_socket [sockfd], sockaddr_in, sockaddr_in_len
+    bind_socket [sockfd], server_host, server_host_len
     test eax, eax
     jl .throw_failed_binding_socket
 
@@ -132,13 +144,19 @@ _start:
     mov [connfd], eax
     test eax, eax
     jl .throw_failed_to_accept_conn
+    inc byte [stage]
 
     open index_filename
     mov [fd_in], eax
     test eax, eax
     jl .throw_cannot_open_file
+    inc byte [stage]
 
-.read:
+.read_req:
+    read [connfd], request, request_len
+    write STDOUT, request, request_len
+
+.read_html:
     read [fd_in], html_content, html_content_len
     push eax
     mov ebx, header_content_length
@@ -156,6 +174,7 @@ _start:
     write STDOUT, html_content, html_content_len
 
     close [fd_in]
+    dec byte [stage]
     jmp .next_request
 
 .throw_cannot_create_socket:
@@ -176,11 +195,27 @@ _start:
 
 .throw_cannot_open_file:
     write STDERR, err_cannot_open_file, err_cannot_open_file_len
+    jmp .close_socket
+
+.shutdown:
+    write STDOUT, shutdown_msg, shutdown_msg_len
+    cmp byte [stage], 0
+    je .exit
+    cmp byte [stage], 1
+    je .close_socket
+    cmp byte [stage], 2
+    je .close_connection
+
+.close_file:
+    write STDOUT, closing_file_msg, closing_file_msg_len
+    close [fd_in]
 
 .close_connection:
+    write STDOUT, closing_connection_msg, closing_connection_msg_len
     close [connfd]
 
 .close_socket:
+    write STDOUT, closing_socket_msg, closing_socket_msg_len
     close [sockfd]
 
 .exit:
@@ -197,31 +232,70 @@ fd_in resd 1
 html_content resb 10485760 ;; 10MB file size limit
 html_content_len equ $ - html_content
 
+request resb 10485760 ;; 10MB file size limit
+request_len equ $ - request
+request_length resb 12
+
 header_content_length resb 12
 header_content_length_len equ $ - header_content_length
 
 ; ---------- DATA SECTION ---------- ;
 section .data
-client_addr:
-    dw AF_INET
-    dw PORT
-    dd IN_ADDR
-    dq 0           ; Empty Padding
-client_addr_len dd $ - client_addr
-
-; ---------- READ-ONLY DATA SECTION ---------- ;
-section .rodata
 ; struct sockaddr_in {
 ;     sa_family_t     sin_family;     /* AF_INET */ (16 bits)
 ;     in_port_t       sin_port;       /* Port number */ (16 bits)
 ;     struct in_addr  sin_addr;       /* IPv4 address */ (32 bits)
 ; };
-sockaddr_in:
-    dw AF_INET
-    dw PORT
-    dd IN_ADDR
-    dq 0           ; Empty Padding
-sockaddr_in_len equ 64
+struc sockaddr_in
+    sin_family:     resw 1
+    sin_port:       resw 1
+    sin_addr:       resd 1
+    padding:        resq 1
+endstruc
+
+client_addr: istruc sockaddr_in
+    at sin_family, dw AF_INET
+    at sin_port, dw PORT
+    at sin_addr, dd IN_ADDR
+    at padding, dq 0           ; Empty Padding
+iend
+client_addr_len dd $ - client_addr
+
+; Stages
+; 0 - Nothing happened just yet
+; 1 - Socket has been created
+; 2 - Connection has been established
+; 3 - Index HTML has been read
+stage db 0
+
+;  struct sigaction {
+;      void     (*sa_handler)(int);
+;      void     (*sa_sigaction)(int, siginfo_t *, void *);
+;      sigset_t   sa_mask;
+;      int        sa_flags;
+;      void     (*sa_restorer)(void);
+;  };
+struc s_sigaction
+    sa_handler:     resd 1
+    sa_flags:       resd 1
+    sa_restorer:    resd 1
+endstruc
+
+sigint_action:  istruc s_sigaction
+    at sa_handler,  dd _start.shutdown
+    at sa_flags,    dd 0
+    at sa_restorer, dd 0
+iend
+
+; ---------- READ-ONLY DATA SECTION ---------- ;
+section .rodata
+server_host: istruc sockaddr_in
+    at sin_family, dw AF_INET
+    at sin_port, dw PORT
+    at sin_addr, dd IN_ADDR
+    at padding, dq 0           ; Empty Padding
+iend
+server_host_len equ 64
 
 index_filename:
     dd "index.html"
@@ -249,6 +323,18 @@ listening_msg_len equ $ - listening_msg
 
 accepting_msg db PREFIX_DEBUG, "Accepting connections...", NEWLINE
 accepting_msg_len equ $ - accepting_msg
+
+shutdown_msg db CR, PREFIX_INFO, "Shutting down server...", NEWLINE
+shutdown_msg_len equ $ - shutdown_msg
+
+closing_socket_msg db PREFIX_DEBUG, "Closing socket...", NEWLINE
+closing_socket_msg_len equ $ - closing_socket_msg
+
+closing_file_msg db PREFIX_DEBUG, "Closing file...", NEWLINE
+closing_file_msg_len equ $ - closing_file_msg
+
+closing_connection_msg db PREFIX_DEBUG, "Closing connection...", NEWLINE
+closing_connection_msg_len equ $ - closing_connection_msg
 
 ; ---------- Error Messages ---------- ;
 err_failed_to_create_socket db PREFIX_ERROR, "Failed to create socket.", NEWLINE
